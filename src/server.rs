@@ -7,9 +7,9 @@ use rmcp::{
 
 use crate::{
     contracts::{
-        DownloadAttachmentInput, DownloadedAttachment, GmailLabel, GmailMessage, GmailThread,
-        IdInput, LabelInput, LabelsOutput, ListMessagesInput, MessagePage, ModifyLabelsInput,
-        MutationResult, UpdateLabelInput,
+        DownloadAttachmentInput, DownloadedAttachment, GmailLabel, GmailMessageOutput,
+        GmailThreadOutput, IdInput, LabelInput, LabelsOutput, ListMessagesInput, MessagePage,
+        ModifyLabelsInput, MutationResult, ReadInput, UpdateLabelInput,
     },
     gmail::GmailClient,
 };
@@ -42,12 +42,12 @@ impl GmailMcpServer {
     }
 
     #[tool(
-        description = "Read one Gmail message with extracted text, attachments, and summary state"
+        description = "Read one Gmail message, optionally returning only identifiers and summary state"
     )]
     async fn get_message(
         &self,
-        Parameters(input): Parameters<IdInput>,
-    ) -> Result<Json<GmailMessage>, ErrorData> {
+        Parameters(input): Parameters<ReadInput>,
+    ) -> Result<Json<GmailMessageOutput>, ErrorData> {
         self.gmail
             .get_message(input)
             .await
@@ -55,11 +55,13 @@ impl GmailMcpServer {
             .map_err(|error| error.into_mcp())
     }
 
-    #[tool(description = "Read a Gmail thread with extracted text, attachments, and summary state")]
+    #[tool(
+        description = "Read a Gmail thread, optionally returning only identifiers and summary states"
+    )]
     async fn get_thread(
         &self,
-        Parameters(input): Parameters<IdInput>,
-    ) -> Result<Json<GmailThread>, ErrorData> {
+        Parameters(input): Parameters<ReadInput>,
+    ) -> Result<Json<GmailThreadOutput>, ErrorData> {
         self.gmail
             .get_thread(input)
             .await
@@ -221,6 +223,19 @@ mod tests {
                 .and_then(|value| value.as_str())
                 == Some("object")
         }));
+        for name in ["get_message", "get_thread"] {
+            let tool = tools.iter().find(|tool| tool.name == name).unwrap();
+            let summaries_only = &tool.input_schema["properties"]["summaries_only"];
+            assert_eq!(summaries_only["type"], "boolean");
+            assert_eq!(summaries_only["default"], false);
+            assert!(
+                !tool.input_schema["required"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|field| field == "summaries_only")
+            );
+        }
     }
 
     #[tokio::test]
@@ -267,6 +282,12 @@ mod tests {
 
         let tools = client.list_tools(None).await.unwrap().tools;
         assert_eq!(tools.len(), 12);
+        for name in ["get_message", "get_thread"] {
+            let tool = tools.iter().find(|tool| tool.name == name).unwrap();
+            let summaries_only = &tool.input_schema["properties"]["summaries_only"];
+            assert_eq!(summaries_only["type"], "boolean");
+            assert_eq!(summaries_only["default"], false);
+        }
         for tool in tools {
             let result = client
                 .call_tool(

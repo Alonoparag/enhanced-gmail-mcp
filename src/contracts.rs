@@ -90,6 +90,13 @@ pub struct IdInput {
     pub id: String,
 }
 
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct ReadInput {
+    pub id: String,
+    #[serde(default)]
+    pub summaries_only: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub struct AttachmentDescriptor {
     pub id: String,
@@ -136,6 +143,58 @@ pub struct GmailThread {
     pub id: String,
     pub messages: Vec<GmailMessage>,
     pub summary: SummaryResult,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct GmailMessageSummary {
+    pub id: String,
+    pub thread_id: Option<String>,
+    pub summary: SummaryResult,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct GmailThreadSummary {
+    pub id: String,
+    pub messages: Vec<GmailMessageSummary>,
+    pub summary: SummaryResult,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[serde(untagged)]
+pub enum GmailMessageOutput {
+    Full(Box<GmailMessage>),
+    Summary(GmailMessageSummary),
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[serde(untagged)]
+pub enum GmailThreadOutput {
+    Full(GmailThread),
+    Summary(GmailThreadSummary),
+}
+
+impl GmailMessage {
+    pub fn into_summary(self) -> GmailMessageSummary {
+        GmailMessageSummary {
+            id: self.id,
+            thread_id: self.thread_id,
+            summary: self.summary,
+        }
+    }
+}
+
+impl GmailThread {
+    pub fn into_summary(self) -> GmailThreadSummary {
+        GmailThreadSummary {
+            id: self.id,
+            messages: self
+                .messages
+                .into_iter()
+                .map(GmailMessage::into_summary)
+                .collect(),
+            summary: self.summary,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
@@ -224,6 +283,38 @@ pub fn validate_modify(input: &ModifyLabelsInput) -> Result<(), Failure> {
 mod tests {
     use super::*;
 
+    fn summary() -> SummaryResult {
+        SummaryResult {
+            status: SummaryStatus::Generated,
+            text: Some("Summary".into()),
+            model: "model".into(),
+            failure_code: None,
+        }
+    }
+
+    fn message() -> GmailMessage {
+        GmailMessage {
+            id: "message-id".into(),
+            thread_id: Some("thread-id".into()),
+            label_ids: vec!["INBOX".into()],
+            snippet: Some("Snippet".into()),
+            internal_date: Some(1),
+            from: Some("sender@example.com".into()),
+            to: Some("recipient@example.com".into()),
+            cc: None,
+            subject: Some("Subject".into()),
+            date: Some("Date".into()),
+            content: "Message content".into(),
+            attachments: vec![AttachmentDescriptor {
+                id: "attachment-id".into(),
+                filename: Some("file.txt".into()),
+                mime_type: Some("text/plain".into()),
+                size: Some(12),
+            }],
+            summary: summary(),
+        }
+    }
+
     #[test]
     fn failure_serializes_as_stable_public_shape() {
         let value = serde_json::to_value(
@@ -256,5 +347,75 @@ mod tests {
             validate_modify(&no_changes).unwrap_err().context["field"],
             "add_label_ids"
         );
+    }
+
+    #[test]
+    fn read_input_defaults_to_full_output() {
+        let input: ReadInput =
+            serde_json::from_value(serde_json::json!({ "id": "message-id" })).unwrap();
+
+        assert!(!input.summaries_only);
+    }
+
+    #[test]
+    fn message_summary_output_contains_only_summary_contract_fields() {
+        let value =
+            serde_json::to_value(GmailMessageOutput::Summary(message().into_summary())).unwrap();
+        let object = value.as_object().unwrap();
+
+        assert_eq!(
+            object.keys().map(String::as_str).collect::<Vec<_>>(),
+            ["id", "summary", "thread_id"]
+        );
+        for field in [
+            "content",
+            "from",
+            "to",
+            "cc",
+            "subject",
+            "date",
+            "internal_date",
+            "snippet",
+            "label_ids",
+            "attachments",
+        ] {
+            assert!(!object.contains_key(field), "unexpected field {field}");
+        }
+    }
+
+    #[test]
+    fn thread_summary_output_contains_only_summary_contract_fields() {
+        let thread = GmailThread {
+            id: "thread-id".into(),
+            messages: vec![message()],
+            summary: summary(),
+        };
+        let value =
+            serde_json::to_value(GmailThreadOutput::Summary(thread.into_summary())).unwrap();
+        let object = value.as_object().unwrap();
+        let message = value["messages"][0].as_object().unwrap();
+
+        assert_eq!(
+            object.keys().map(String::as_str).collect::<Vec<_>>(),
+            ["id", "messages", "summary"]
+        );
+        assert_eq!(
+            message.keys().map(String::as_str).collect::<Vec<_>>(),
+            ["id", "summary", "thread_id"]
+        );
+        for field in [
+            "content",
+            "from",
+            "to",
+            "cc",
+            "subject",
+            "date",
+            "internal_date",
+            "snippet",
+            "label_ids",
+            "attachments",
+        ] {
+            assert!(!message.contains_key(field), "unexpected field {field}");
+        }
     }
 }

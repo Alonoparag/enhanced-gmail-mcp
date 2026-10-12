@@ -15,6 +15,7 @@ This plan verifies the current [system design](system-design.md). Native backend
 - Add one message to a thread, reuse prior message summaries, call the provider once for the new message, and call it once for the changed thread.
 - Select Groq after an OpenAI failure and parse the strict summary response.
 - Serialize tool successes, summary states, and failures to their documented JSON shapes.
+- Serialize full reads by default and exclude content, headers, snippets, labels, and attachments from summaries-only reads.
 
 ### Bad routes
 
@@ -35,6 +36,7 @@ This plan verifies the current [system design](system-design.md). Native backend
 
 - List and read Gmail data from the authenticated mailbox without printing message bodies.
 - Fetch a real thread and verify every message summary plus the overall thread summary.
+- Repeat message and thread reads in summaries-only mode and verify no full-message fields are returned.
 - Fetch the same thread again and verify SQLite reuse from safe provider-call metadata.
 - Exercise changed-thread behavior with a deterministic fixture unless a disposable live thread is supplied.
 - Exercise label, archive, spam, and attachment operations only on disposable Gmail data.

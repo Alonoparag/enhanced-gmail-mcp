@@ -17,9 +17,10 @@ use uuid::Uuid;
 use crate::{
     contracts::{
         AttachmentDescriptor, DownloadAttachmentInput, DownloadedAttachment, Failure, FailureCode,
-        GmailLabel, GmailMessage, GmailThread, IdInput, LabelInput, LabelsOutput,
-        ListMessagesInput, MessagePage, MessageRef, ModifyLabelsInput, MutationResult,
-        SummaryResult, UpdateLabelInput, require_non_empty, validate_modify,
+        GmailLabel, GmailMessage, GmailMessageOutput, GmailThread, GmailThreadOutput, IdInput,
+        LabelInput, LabelsOutput, ListMessagesInput, MessagePage, MessageRef, ModifyLabelsInput,
+        MutationResult, ReadInput, SummaryResult, UpdateLabelInput, require_non_empty,
+        validate_modify,
     },
     summary::Summarizer,
 };
@@ -141,7 +142,7 @@ impl GmailClient {
         })
     }
 
-    pub async fn get_message(&self, input: IdInput) -> Result<GmailMessage, Failure> {
+    pub async fn get_message(&self, input: ReadInput) -> Result<GmailMessageOutput, Failure> {
         require_non_empty(&input.id, "id")?;
         let (_, message) = self
             .hub
@@ -152,10 +153,15 @@ impl GmailClient {
             .doit()
             .await
             .map_err(gmail_error)?;
-        self.map_message(message).await
+        let message = self.map_message(message).await?;
+        Ok(if input.summaries_only {
+            GmailMessageOutput::Summary(message.into_summary())
+        } else {
+            GmailMessageOutput::Full(Box::new(message))
+        })
     }
 
-    pub async fn get_thread(&self, input: IdInput) -> Result<GmailThread, Failure> {
+    pub async fn get_thread(&self, input: ReadInput) -> Result<GmailThreadOutput, Failure> {
         require_non_empty(&input.id, "id")?;
         let (_, thread) = self
             .hub
@@ -175,10 +181,15 @@ impl GmailClient {
             .map(|message| (message.content.clone(), message.summary.clone()))
             .collect::<Vec<_>>();
         let summary = self.summarizer.summarize_thread(&summary_inputs).await;
-        Ok(GmailThread {
+        let thread = GmailThread {
             id: thread.id.unwrap_or(input.id),
             messages,
             summary,
+        };
+        Ok(if input.summaries_only {
+            GmailThreadOutput::Summary(thread.into_summary())
+        } else {
+            GmailThreadOutput::Full(thread)
         })
     }
 

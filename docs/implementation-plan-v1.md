@@ -21,13 +21,14 @@ Completion checks:
 
 Deliverables:
 
-- Message listing, full message and thread reads, MIME extraction, and attachment descriptors.
+- Message listing, full or summaries-only message and thread reads, MIME extraction, and attachment descriptors.
 - Durable message and thread summaries with OpenAI primary and Groq fallback.
 - Label management, label modification, archive, spam, and attachment-download tools.
 
 Completion checks:
 
 - All 12 discovered tools match the system-design contracts.
+- Existing read requests remain compatible, while summaries-only requests exclude message content and metadata outside the summary contracts.
 - Unchanged messages and threads reuse SQLite summaries.
 - A changed thread reuses old message summaries, summarizes each new message, and regenerates its thread summary.
 - Cache or provider failure preserves Gmail content and reports unavailable summary state.
