@@ -1,0 +1,30 @@
+services:
+  gmail-mcp:
+    build: .
+    ports:
+      - "127.0.0.1:3000:3000"
+    environment:
+      ATTACHMENT_ROOT: /attachments
+      BIND_ADDRESS: 0.0.0.0:3000
+      CONFIG_BASIC_PASSWORD: ${CONFIG_BASIC_PASSWORD:?set CONFIG_BASIC_PASSWORD}
+      CONFIG_BASIC_USERNAME: ${CONFIG_BASIC_USERNAME:?set CONFIG_BASIC_USERNAME}
+      DATABASE_URL: sqlite:///data/gmail-mcp.db?mode=rwc
+      GMAIL_CLIENT_SECRET: /run/secrets/gmail_client_secret
+      GMAIL_TOKEN_CACHE: /data/token_cache.json
+      GROQ_API_KEY_FILE: /run/provider-secrets/groq_api_key
+      GROQ_MODEL: ${GROQ_MODEL:-openai/gpt-oss-20b}
+      MCP_ALLOWED_HOSTS: localhost,127.0.0.1,gmail-mcp
+    secrets:
+      - gmail_client_secret
+    volumes:
+      - ${RUNTIME_DATA_DIR:-./.runtime-data}:/data
+      - gmail-attachments:/attachments
+      - ./.secrets:/run/provider-secrets:ro
+    restart: unless-stopped
+
+volumes:
+  gmail-attachments:
+
+secrets:
+  gmail_client_secret:
+    file: ./.secrets/client_secret.json
