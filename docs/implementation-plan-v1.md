@@ -21,8 +21,8 @@ Completion checks:
 
 Deliverables:
 
-- Message listing, full or summaries-only message and thread reads, MIME extraction, and attachment descriptors.
-- Durable message and thread summaries with OpenAI primary and Groq fallback.
+- Paged identifier or summary-only message listing, full or summaries-only message and thread reads, MIME extraction, and attachment descriptors.
+- Durable message and thread summaries with globally bounded provider concurrency, transient retries, OpenAI primary, and Groq fallback.
 - Label management, label modification, archive, spam, and attachment-download tools.
 
 Completion checks:
@@ -32,6 +32,8 @@ Completion checks:
 - Unchanged messages and threads reuse SQLite summaries.
 - A changed thread reuses old message summaries, summarizes each new message, and regenerates its thread summary.
 - Cache or provider failure preserves Gmail content and reports unavailable summary state.
+- Summary-only message pages preserve Gmail pagination and report provider failure per item.
+- Retryable provider failures honor `Retry-After` or capped exponential backoff with jitter before fallback.
 
 ## Phase 3: Host and configuration operations
 

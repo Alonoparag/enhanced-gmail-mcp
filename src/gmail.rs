@@ -18,9 +18,9 @@ use crate::{
     contracts::{
         AttachmentDescriptor, DownloadAttachmentInput, DownloadedAttachment, Failure, FailureCode,
         GmailLabel, GmailMessage, GmailMessageOutput, GmailThread, GmailThreadOutput, IdInput,
-        LabelInput, LabelsOutput, ListMessagesInput, MessagePage, MessageRef, ModifyLabelsInput,
-        MutationResult, ReadInput, SummaryResult, UpdateLabelInput, require_non_empty,
-        validate_modify,
+        LabelInput, LabelsOutput, ListMessagesInput, ListMessagesOutput, MessagePage, MessageRef,
+        MessageSummaryPage, ModifyLabelsInput, MutationResult, ReadInput, SummaryResult,
+        UpdateLabelInput, require_non_empty, validate_modify,
     },
     summary::Summarizer,
 };
@@ -100,7 +100,10 @@ impl GmailClient {
         })
     }
 
-    pub async fn list_messages(&self, input: ListMessagesInput) -> Result<MessagePage, Failure> {
+    pub async fn list_messages(
+        &self,
+        input: ListMessagesInput,
+    ) -> Result<ListMessagesOutput, Failure> {
         if let Some(max) = input.max_results
             && !(1..=100).contains(&max)
         {
@@ -130,35 +133,54 @@ impl GmailClient {
             .doit()
             .await
             .map_err(gmail_error)?;
-        Ok(MessagePage {
-            items: response
-                .messages
-                .unwrap_or_default()
-                .into_iter()
-                .map(message_ref)
-                .collect(),
-            next_page_token: response.next_page_token,
-            result_size_estimate: response.result_size_estimate,
-        })
+        let messages = response.messages.unwrap_or_default();
+        if input.summaries_only {
+            let mut items = Vec::with_capacity(messages.len());
+            for message in messages {
+                let id = message.id.ok_or_else(|| {
+                    Failure::new(
+                        FailureCode::GmailError,
+                        "Gmail returned a message without an identifier",
+                        true,
+                    )
+                })?;
+                items.push(self.fetch_message(&id).await?.into_summary());
+            }
+            Ok(ListMessagesOutput::Summaries(MessageSummaryPage {
+                items,
+                next_page_token: response.next_page_token,
+                result_size_estimate: response.result_size_estimate,
+            }))
+        } else {
+            Ok(ListMessagesOutput::References(MessagePage {
+                items: messages.into_iter().map(message_ref).collect(),
+                next_page_token: response.next_page_token,
+                result_size_estimate: response.result_size_estimate,
+            }))
+        }
     }
 
     pub async fn get_message(&self, input: ReadInput) -> Result<GmailMessageOutput, Failure> {
         require_non_empty(&input.id, "id")?;
-        let (_, message) = self
-            .hub
-            .users()
-            .messages_get("me", &input.id)
-            .format("full")
-            .add_scope(READ_SCOPE)
-            .doit()
-            .await
-            .map_err(gmail_error)?;
-        let message = self.map_message(message).await?;
+        let message = self.fetch_message(&input.id).await?;
         Ok(if input.summaries_only {
             GmailMessageOutput::Summary(message.into_summary())
         } else {
             GmailMessageOutput::Full(Box::new(message))
         })
+    }
+
+    async fn fetch_message(&self, id: &str) -> Result<GmailMessage, Failure> {
+        let (_, message) = self
+            .hub
+            .users()
+            .messages_get("me", id)
+            .format("full")
+            .add_scope(READ_SCOPE)
+            .doit()
+            .await
+            .map_err(gmail_error)?;
+        self.map_message(message).await
     }
 
     pub async fn get_thread(&self, input: ReadInput) -> Result<GmailThreadOutput, Failure> {

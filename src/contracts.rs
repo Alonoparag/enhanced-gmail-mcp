@@ -70,6 +70,8 @@ pub struct ListMessagesInput {
     pub page_token: Option<String>,
     #[serde(default)]
     pub include_spam_trash: bool,
+    #[serde(default)]
+    pub summaries_only: bool,
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]
@@ -83,6 +85,20 @@ pub struct MessagePage {
     pub items: Vec<MessageRef>,
     pub next_page_token: Option<String>,
     pub result_size_estimate: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct MessageSummaryPage {
+    pub items: Vec<GmailMessageSummary>,
+    pub next_page_token: Option<String>,
+    pub result_size_estimate: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[serde(untagged)]
+pub enum ListMessagesOutput {
+    References(MessagePage),
+    Summaries(MessageSummaryPage),
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
@@ -194,6 +210,49 @@ impl GmailThread {
                 .collect(),
             summary: self.summary,
         }
+    }
+}
+
+#[cfg(test)]
+mod summary_page_tests {
+    use super::*;
+
+    #[test]
+    fn summary_page_serialization_contains_only_summary_contract_fields() {
+        let output = ListMessagesOutput::Summaries(MessageSummaryPage {
+            items: vec![GmailMessageSummary {
+                id: "message-id".into(),
+                thread_id: Some("thread-id".into()),
+                summary: SummaryResult {
+                    status: SummaryStatus::Generated,
+                    text: Some("safe summary".into()),
+                    model: "model".into(),
+                    failure_code: None,
+                },
+            }],
+            next_page_token: Some("next".into()),
+            result_size_estimate: Some(2),
+        });
+        let value = serde_json::to_value(output).unwrap();
+        let item = &value["items"][0];
+        assert_eq!(item["id"], "message-id");
+        assert_eq!(item["thread_id"], "thread-id");
+        assert!(item.get("summary").is_some());
+        for excluded in [
+            "content",
+            "from",
+            "to",
+            "cc",
+            "subject",
+            "date",
+            "snippet",
+            "label_ids",
+            "attachments",
+        ] {
+            assert!(item.get(excluded).is_none(), "unexpected field {excluded}");
+        }
+        assert_eq!(value["next_page_token"], "next");
+        assert_eq!(value["result_size_estimate"], 2);
     }
 }
 

@@ -14,6 +14,10 @@ services:
       GROQ_API_KEY_FILE: /run/provider-secrets/groq_api_key
       GROQ_MODEL: ${GROQ_MODEL:-openai/gpt-oss-20b}
       MCP_ALLOWED_HOSTS: localhost,127.0.0.1,gmail-mcp
+      SUMMARY_MAX_ATTEMPTS: ${SUMMARY_MAX_ATTEMPTS:-4}
+      SUMMARY_MAX_CONCURRENCY: ${SUMMARY_MAX_CONCURRENCY:-2}
+      SUMMARY_RETRY_BASE_MS: ${SUMMARY_RETRY_BASE_MS:-1000}
+      SUMMARY_RETRY_MAX_MS: ${SUMMARY_RETRY_MAX_MS:-30000}
     secrets:
       - gmail_client_secret
     volumes:

@@ -8,8 +8,8 @@ use rmcp::{
 use crate::{
     contracts::{
         DownloadAttachmentInput, DownloadedAttachment, GmailLabel, GmailMessageOutput,
-        GmailThreadOutput, IdInput, LabelInput, LabelsOutput, ListMessagesInput, MessagePage,
-        ModifyLabelsInput, MutationResult, ReadInput, UpdateLabelInput,
+        GmailThreadOutput, IdInput, LabelInput, LabelsOutput, ListMessagesInput,
+        ListMessagesOutput, ModifyLabelsInput, MutationResult, ReadInput, UpdateLabelInput,
     },
     gmail::GmailClient,
 };
@@ -29,11 +29,13 @@ impl GmailMcpServer {
         }
     }
 
-    #[tool(description = "List Gmail messages using query, label, inbox, and pagination filters")]
+    #[tool(
+        description = "List a Gmail page as identifiers or summary-only items using query, label, inbox, and pagination filters"
+    )]
     async fn list_messages(
         &self,
         Parameters(input): Parameters<ListMessagesInput>,
-    ) -> Result<Json<MessagePage>, ErrorData> {
+    ) -> Result<Json<ListMessagesOutput>, ErrorData> {
         self.gmail
             .list_messages(input)
             .await
@@ -223,18 +225,18 @@ mod tests {
                 .and_then(|value| value.as_str())
                 == Some("object")
         }));
-        for name in ["get_message", "get_thread"] {
+        for name in ["list_messages", "get_message", "get_thread"] {
             let tool = tools.iter().find(|tool| tool.name == name).unwrap();
             let summaries_only = &tool.input_schema["properties"]["summaries_only"];
             assert_eq!(summaries_only["type"], "boolean");
             assert_eq!(summaries_only["default"], false);
-            assert!(
-                !tool.input_schema["required"]
+            assert!(tool.input_schema.get("required").is_none_or(|required| {
+                !required
                     .as_array()
                     .unwrap()
                     .iter()
                     .any(|field| field == "summaries_only")
-            );
+            }));
         }
     }
 
@@ -282,7 +284,7 @@ mod tests {
 
         let tools = client.list_tools(None).await.unwrap().tools;
         assert_eq!(tools.len(), 12);
-        for name in ["get_message", "get_thread"] {
+        for name in ["list_messages", "get_message", "get_thread"] {
             let tool = tools.iter().find(|tool| tool.name == name).unwrap();
             let summaries_only = &tool.input_schema["properties"]["summaries_only"];
             assert_eq!(summaries_only["type"], "boolean");

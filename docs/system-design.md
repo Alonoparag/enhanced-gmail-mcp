@@ -2,11 +2,11 @@
 
 ## Functional Requirements
 
-- **FR1:** The system must let an MCP caller retrieve Gmail messages and threads, including inbox-only retrieval and Gmail search-based filtering.
+- **FR1:** The system must let an MCP caller retrieve paged Gmail message identifiers or summary-only items and retrieve Gmail threads, including inbox-only retrieval and Gmail search-based filtering.
 - **FR2:** The system must let an MCP caller retrieve and create labels and add or remove labels from emails.
 - **FR3:** The system must let an MCP caller archive emails and mark emails as spam.
 - **FR4:** The system must let an MCP caller download email attachments.
-- **FR5:** The system must return each read Gmail message as JSON serialized from Rust-owned structures, with a generated message summary. The caller may request a summaries-only result that omits message content.
+- **FR5:** The system must return each read Gmail message as JSON serialized from Rust-owned structures, with a generated message summary. The caller may request summaries-only single-message or paged-list results that omit message content.
 - **FR6:** The system must let a local operator create, retrieve, update, and delete server configurations through an API.
 - **FR7:** The system must return each read Gmail thread with a generated thread summary and generated summaries for its constituent messages. The caller may request a summaries-only result that omits constituent message content. Re-reading a changed thread must include newly arrived messages.
 
@@ -21,6 +21,7 @@
 - **TR7:** The local HTTP interfaces may use Basic authentication.
 - **TR8:** Summary identities must include the summary contract version, configured model chain, and source content. Thread-summary identities must additionally include the ordered identities of their constituent message summaries. An unchanged identity must reuse its stored summary without a provider call.
 - **TR9:** Host-side startup preparation must validate configured provider keys in ignored mode-`0600` files and may export missing files from macOS Keychain. The Linux service reads the files and does not access Keychain directly.
+- **TR10:** Summary-provider calls must use a global bounded concurrency limit. Transient transport failures and HTTP `408`, `429`, and `5xx` responses must use bounded retries that honor `Retry-After` and otherwise apply capped exponential backoff with jitter. Other client errors and invalid successful responses are not retried.
 
 ## System Interface
 
@@ -28,7 +29,7 @@
 
 The service exposes Streamable HTTP MCP at `/mcp` with these tools:
 
-- `list_messages`: lists message identifiers using Gmail query syntax, optional label filters, pagination, and an inbox-only option.
+- `list_messages`: lists one Gmail page as message identifiers by default or summary-only items when requested, using Gmail query syntax, optional label filters, pagination, and an inbox-only option.
 - `get_message`: reads one message and returns either the full message representation or its identifiers and summary state.
 - `get_thread`: reads all messages in one thread and returns either the full thread representation or its identifiers and summary states.
 - `list_labels`, `create_label`, `update_label`, and `delete_label`: manage Gmail labels.
@@ -65,6 +66,13 @@ Before native or container startup, the operator invokes one host command that v
 4. The service derives a summary cache key from the message content, summary contract version, and model.
 5. A SQLite hit supplies the summary. On a miss, the service calls the configured provider chain and persists a successful response.
 6. The service selects the full or summaries-only response shape requested by the caller. Summary failure remains visible through summary state.
+
+### Message list reads
+
+1. MCP validates the typed request and retrieves one Gmail list page.
+2. The default route returns that page's message identifiers and pagination metadata.
+3. For a summaries-only request, the service reads and summarizes each listed message through the message-read cache and provider flow.
+4. The service returns summary-only items with the original Gmail `next_page_token` and `result_size_estimate`; it creates no additional cursor.
 
 ### Thread reads
 
@@ -105,14 +113,16 @@ Before native or container startup, the operator invokes one host command that v
 
 ### Message contracts
 
-- `ListMessagesInput`: optional Gmail `query`, `label_ids`, optional `inbox_only`, optional `include_spam_trash`, optional `max_results` from 1 through 100, and optional `page_token`.
+- `ListMessagesInput`: optional Gmail `query`, `label_ids`, optional `inbox_only`, optional `include_spam_trash`, optional `max_results` from 1 through 100, optional `page_token`, and optional `summaries_only` defaulting to `false`.
 - `GetMessageInput`: non-empty `id` and optional `summaries_only`, defaulting to `false`.
 - `GetThreadInput`: non-empty `id` and optional `summaries_only`, defaulting to `false`.
 - `GmailMessage`: `id`, optional `thread_id`, `label_ids`, optional `snippet`, optional Gmail `internal_date`, selected headers (`from`, `to`, `cc`, `subject`, `date`), extracted `content`, attachment descriptors, and `summary`.
 - `GmailThread`: `id`, ordered `messages`, and `summary`.
 - `GmailMessageSummary`: `id`, optional `thread_id`, and `summary`.
+- `MessagePage`: `MessageRef` items, optional Gmail `next_page_token`, and optional `result_size_estimate`.
+- `MessageSummaryPage`: `GmailMessageSummary` items with the same pagination metadata.
 - `GmailThreadSummary`: `id`, ordered `GmailMessageSummary` values, and `summary`.
-- Message and thread read outputs use their full contracts when `summaries_only` is false and their summary contracts when it is true.
+- Message and thread read outputs use their full contracts when `summaries_only` is false and their summary contracts when it is true. Message listing uses `MessagePage` when false and `MessageSummaryPage` when true.
 - `AttachmentDescriptor`: Gmail attachment `id`, optional source `filename`, optional MIME type, and optional byte `size`.
 - `SummaryResult`: `status` (`generated`, `cached`, or `unavailable`), optional `text`, model name, and optional safe failure code.
 
@@ -144,10 +154,10 @@ Public failures use stable codes:
 - `conflict`: a uniqueness or state constraint failed.
 - `gmail_error`: Gmail rejected or could not complete an operation.
 - `storage_error`: SQLite or filesystem work failed.
-- `summary_error`: Summary cache or provider-chain work failed; full reads preserve message content while summaries-only reads continue to omit it.
+- `summary_error`: Summary cache or provider-chain work failed; full reads preserve message content while summaries-only reads and list items continue to omit it. A list-item summary failure is returned as unavailable summary state rather than failing the page.
 - `internal_error`: an unclassified internal operation failed.
 
-Failures expose a safe client message and retryability. Context may contain only bounded identifiers or field names. Logs record operation names, failure codes, and safe identifiers; they omit credentials, authorization headers, OAuth tokens, message content, summaries, raw Gmail payloads, and attachment bytes.
+Failures expose a safe client message and retryability. Context may contain only bounded identifiers or field names. Provider diagnostics record the provider model, status or transport category, attempt, and retry delay. Logs omit credentials, authorization headers, OAuth tokens, message content, summaries, request and response bodies, raw Gmail payloads, and attachment bytes.
 
 ## Persistence
 
