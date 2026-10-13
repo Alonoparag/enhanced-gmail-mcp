@@ -16,7 +16,7 @@
 - **TR2:** SQLite must own durable server configuration and summary-cache state.
 - **TR3:** The service must expose MCP over Streamable HTTP so clients outside its container can connect.
 - **TR4:** Public tool inputs, successful outputs, and failures must use typed Rust structures with discoverable JSON schemas and Serde JSON serialization.
-- **TR5:** Email reading must extract textual content from Gmail MIME payloads and request message and thread summaries from OpenAI `gpt-6-luna` with reasoning disabled. If OpenAI is unavailable, the service must use Groq `openai/gpt-oss-20b` with low reasoning. A summarization failure must preserve email content and expose summary status separately.
+- **TR5:** Email reading must extract textual content from Gmail MIME payloads and request message and thread summaries from Groq `openai/gpt-oss-20b` with low reasoning. If Groq is unavailable, the service must use OpenAI `gpt-6-luna` with reasoning disabled. A summarization failure must preserve email content and expose summary status separately.
 - **TR6:** Credentials, OAuth tokens, email content, summaries, and attachment data must not be written to logs. Persistent credentials and SQLite data must survive container recreation through mounted storage.
 - **TR7:** The local HTTP interfaces may use Basic authentication.
 - **TR8:** Summary identities must include the summary contract version, configured model chain, and source content. Thread-summary identities must additionally include the ordered identities of their constituent message summaries. An unchanged identity must reuse its stored summary without a provider call.

@@ -22,7 +22,7 @@ Completion checks:
 Deliverables:
 
 - Paged identifier or summary-only message listing, full or summaries-only message and thread reads, MIME extraction, and attachment descriptors.
-- Durable message and thread summaries with globally bounded provider concurrency, transient retries, OpenAI primary, and Groq fallback.
+- Durable message and thread summaries with globally bounded provider concurrency, transient retries, Groq primary, and OpenAI fallback.
 - Label management, label modification, archive, spam, and attachment-download tools.
 
 Completion checks:

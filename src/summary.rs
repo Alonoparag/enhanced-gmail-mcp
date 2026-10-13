@@ -236,14 +236,11 @@ impl Summarizer {
         SummaryResult {
             status: SummaryStatus::Unavailable,
             text: None,
-            model: if self.openai_api_key.is_some() {
-                OPENAI_MODEL.into()
-            } else {
-                self.groq
-                    .as_ref()
-                    .map_or(OPENAI_MODEL, |provider| provider.model.as_ref())
-                    .into()
-            },
+            model: self
+                .groq
+                .as_ref()
+                .map_or(OPENAI_MODEL, |provider| provider.model.as_ref())
+                .into(),
             failure_code: Some(FailureCode::SummaryError),
         }
     }
@@ -373,20 +370,20 @@ impl Summarizer {
 
     fn providers(&self) -> Vec<Provider<'_>> {
         let mut providers = Vec::with_capacity(2);
-        if let Some(key) = &self.openai_api_key {
-            providers.push(Provider {
-                endpoint: &self.openai_endpoint,
-                api_key: key,
-                model: OPENAI_MODEL,
-                reasoning_effort: "none",
-            });
-        }
         if let Some(groq) = &self.groq {
             providers.push(Provider {
                 endpoint: &self.groq_endpoint,
                 api_key: &groq.api_key,
                 model: &groq.model,
                 reasoning_effort: "low",
+            });
+        }
+        if let Some(key) = &self.openai_api_key {
+            providers.push(Provider {
+                endpoint: &self.openai_endpoint,
+                api_key: key,
+                model: OPENAI_MODEL,
+                reasoning_effort: "none",
             });
         }
         providers
@@ -677,10 +674,10 @@ mod tests {
         let summarizer = test_summarizer(true, true);
         let providers = summarizer.providers();
         assert_eq!(providers.len(), 2);
-        assert_eq!(providers[0].model, "gpt-6-luna");
-        assert_eq!(providers[0].reasoning_effort, "none");
-        assert_eq!(providers[1].model, "openai/gpt-oss-20b");
-        assert_eq!(providers[1].reasoning_effort, "low");
+        assert_eq!(providers[0].model, "openai/gpt-oss-20b");
+        assert_eq!(providers[0].reasoning_effort, "low");
+        assert_eq!(providers[1].model, "gpt-6-luna");
+        assert_eq!(providers[1].reasoning_effort, "none");
         assert_eq!(
             test_summarizer(false, true).providers()[0].model,
             "openai/gpt-oss-20b"
@@ -768,23 +765,23 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn openai_failure_falls_back_to_groq() {
+    async fn groq_failure_falls_back_to_openai() {
         async fn unavailable(State(calls): State<Arc<AtomicUsize>>) -> axum::http::StatusCode {
             calls.fetch_add(1, Ordering::SeqCst);
             axum::http::StatusCode::SERVICE_UNAVAILABLE
         }
 
-        let (mut summarizer, groq_calls, _directory) = counting_summarizer().await;
-        let groq_endpoint = summarizer.openai_endpoint.clone();
-        let openai_calls = Arc::new(AtomicUsize::new(0));
+        let (mut summarizer, openai_calls, _directory) = counting_summarizer().await;
+        let openai_endpoint = summarizer.openai_endpoint.clone();
+        let groq_calls = Arc::new(AtomicUsize::new(0));
         let app = Router::new()
             .route("/responses", post(unavailable))
-            .with_state(openai_calls.clone());
+            .with_state(groq_calls.clone());
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
         tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
-        summarizer.openai_endpoint = Arc::from(format!("http://{address}/responses"));
-        summarizer.groq_endpoint = groq_endpoint;
+        summarizer.openai_endpoint = openai_endpoint;
+        summarizer.groq_endpoint = Arc::from(format!("http://{address}/responses"));
         summarizer.groq = Some(GroqFallback {
             api_key: Arc::from("groq-key"),
             model: Arc::from("openai/gpt-oss-20b"),
@@ -792,12 +789,12 @@ mod tests {
 
         let result = summarizer.summarize("fallback content").await;
         assert_eq!(result.status, SummaryStatus::Generated);
-        assert_eq!(result.model, "openai/gpt-oss-20b");
+        assert_eq!(result.model, "gpt-6-luna");
         assert_eq!(
-            openai_calls.load(Ordering::SeqCst),
+            groq_calls.load(Ordering::SeqCst),
             DEFAULT_MAX_ATTEMPTS as usize
         );
-        assert_eq!(groq_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(openai_calls.load(Ordering::SeqCst), 1);
     }
 
     #[tokio::test]

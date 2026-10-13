@@ -13,7 +13,7 @@ This plan verifies the current [system design](system-design.md). Native backend
 - Persist a message summary and reuse it without another provider request.
 - Persist an unchanged thread summary and reuse it without another provider request.
 - Add one message to a thread, reuse prior message summaries, call the provider once for the new message, and call it once for the changed thread.
-- Select Groq after an OpenAI failure and parse the strict summary response.
+- Select OpenAI after a Groq failure and parse the strict summary response.
 - Retry transport failures and HTTP `408`, `429`, and `5xx`, honor `Retry-After`, reject retries for other `4xx` responses, and fall back after retry exhaustion.
 - Enforce the configured provider concurrency cap across shared summarizer clones.
 - Serialize tool successes, summary states, and failures to their documented JSON shapes.
