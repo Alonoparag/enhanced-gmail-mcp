@@ -1,49 +1,79 @@
+<div align="center">
+
 # Enhanced Gmail MCP
 
-A Rust Gmail service exposing Streamable HTTP MCP and a local configuration API. The [system design](docs/system-design.md) owns the V1 contract; the active [implementation](docs/implementation-plan-v1.md) and [testing](docs/testing-plan-v1.md) plans track delivery.
+**A privacy-conscious Gmail server for Model Context Protocol clients.**
 
-## V1 capabilities
+Read and organize Gmail, download attachments, and generate cached summaries through a typed Rust service.
 
-- Query and read Gmail messages and threads with extracted text and attachment descriptors.
-- Create, update, delete, and apply labels; archive messages and mark messages as spam.
-- Download attachments into server-owned persistent storage.
-- Summarize with Groq `openai/gpt-oss-20b`; OpenAI `gpt-6-luna` remains an optional primary provider when configured.
-- Store non-secret server configurations and reconstructable summaries in SQLite.
+[![Rust](https://img.shields.io/badge/Rust-1.88%2B-000000?logo=rust)](https://www.rust-lang.org/)
+[![MCP](https://img.shields.io/badge/MCP-Streamable_HTTP-6f42c1)](https://modelcontextprotocol.io/)
+[![Gmail API](https://img.shields.io/badge/Gmail-API-EA4335?logo=gmail&logoColor=white)](https://developers.google.com/gmail/api)
+[![Docker Compose](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white)](https://docs.docker.com/compose/)
 
-MCP is served at `http://localhost:3000/mcp`. Configuration CRUD is served at `/configurations` and `/configurations/{id}`.
+</div>
 
-## Google OAuth bootstrap
+## What it does
 
-Create a Google Cloud Desktop OAuth client, enable Gmail API access, and save its downloaded JSON as `.secrets/client_secret.json`. The file must use mode `0600`; Compose mounts it as a secret. Complete the installed-app consent flow on the host:
+- Searches and reads Gmail messages and complete threads.
+- Returns full typed results or privacy-minimized summary-only pages.
+- Creates, updates, deletes, and applies Gmail labels.
+- Archives messages, marks spam, and downloads attachments to server-owned storage.
+- Generates summaries with Groq `openai/gpt-oss-20b`, falling back to OpenAI `gpt-6-luna` when Groq is unavailable.
+- Reuses content-addressed summaries from SQLite to avoid unnecessary provider calls.
+- Exposes a local configuration API alongside the MCP endpoint.
 
-```sh
-chmod 600 .secrets/client_secret.json
-cargo run --bin oauth_bootstrap
+The MCP server uses Streamable HTTP at `http://localhost:3000/mcp`. The configuration API is available at `/configurations` and `/configurations/{id}`.
+
+## Design at a glance
+
+```text
+MCP client ──► Rust / Axum service ──► Gmail API
+                         │
+                         ├──► Groq ──fallback──► OpenAI
+                         │
+                         └──► SQLite cache + configuration
 ```
 
-The bootstrap defaults to `.secrets/client_secret.json` and writes `token_cache.json` at the repository root. Optional positional arguments can override both paths.
+The [system design](docs/system-design.md) owns the current requirements and contracts. The active [implementation plan](docs/implementation-plan-v1.md) and [testing plan](docs/testing-plan-v1.md) track delivery and verification.
 
-The named data volume preserves the token cache across container recreation. Token refresh is unattended after bootstrap.
+## Prerequisites
 
-The service requests read-only, label-management, or mailbox-modification scope for the operation being performed. It does not request send scope.
+- Rust 1.88 or newer
+- Docker with Compose
+- A Google Cloud Desktop OAuth client with the Gmail API enabled
+- A Groq API key
+- Optional OpenAI API key for provider fallback
 
-## API keys on macOS
+## Configure Gmail OAuth
 
-Write the Groq key to the ignored `.secrets/groq_api_key` file, or place `GROQ_API_KEY=...` in `.secrets/.secrets`. Secret files must use mode `0600`. Then prepare the runtime directory. OpenAI configuration is optional:
+1. Download the Google Desktop OAuth client JSON to `.secrets/client_secret.json`.
+2. Restrict the file and complete the installed-app consent flow:
 
 ```sh
 mkdir -p .secrets
 chmod 700 .secrets
-# Write the key with your preferred secret manager or editor.
-chmod 600 .secrets/groq_api_key
-cargo run --bin prepare_host -- .runtime-data groq
+chmod 600 .secrets/client_secret.json
+cargo run --bin oauth_bootstrap
 ```
 
-`prepare_host` verifies the mode-safe OAuth cache and selected provider files, then copies the cache into the selected runtime data directory without printing credential values. If a selected provider file is absent, the command retains Keychain export as a compatibility fallback. Use `groq` for the default path; `openai` and `both` remain supported. When both are configured, OpenAI is primary and Groq is the fallback. `GROQ_MODEL` defaults to `openai/gpt-oss-20b`.
+The bootstrap writes `token_cache.json` at the repository root by default. Runtime storage preserves the cache across container recreation, allowing unattended token refresh after initial consent.
 
-## Run with Compose
+## Configure summary providers
 
-Set Basic-auth credentials without committing them:
+Store provider keys in ignored, mode-`0600` files:
+
+```sh
+chmod 600 .secrets/groq_api_key
+chmod 600 .secrets/openai_api_key  # optional fallback
+cargo run --bin prepare_host -- .runtime-data both
+```
+
+`prepare_host` validates provider files and OAuth state without printing credential values. On macOS, it can export a missing provider file from Keychain. Use `groq` instead of `both` when OpenAI fallback is not configured.
+
+## Run
+
+Set local configuration-API credentials, then start the service:
 
 ```sh
 export CONFIG_BASIC_USERNAME=operator
@@ -51,9 +81,9 @@ export CONFIG_BASIC_PASSWORD='replace-me'
 docker compose up --build
 ```
 
-Container build and startup follow successful native MCP smoke tests. Compose mounts `RUNTIME_DATA_DIR` (default `.runtime-data`) for SQLite and OAuth state and a named volume for attachments. The MCP host allowlist is explicit and includes loopback plus the Compose service authority.
+Compose binds the service to `127.0.0.1:3000`, mounts persistent OAuth and SQLite state, and stores downloaded attachments in a named volume.
 
-## Local verification
+## Verify locally
 
 ```sh
 cargo fmt --check
@@ -63,4 +93,14 @@ cargo clippy --all-targets --all-features -- -D warnings
 CONFIG_BASIC_USERNAME=test CONFIG_BASIC_PASSWORD=test docker compose config
 ```
 
-Live Gmail mutations, downloads, OAuth persistence, and provider fallback require operator credentials and disposable mailbox data; local compilation and fake-boundary tests do not replace those gates.
+Live mutation and download tests require operator credentials and disposable Gmail data. Provider fallback is covered deterministically without intentionally failing a live provider.
+
+## Security boundaries
+
+- OAuth credentials, tokens, provider keys, runtime data, and downloaded attachments are ignored by Git.
+- Secrets must use mode `0600`; `.secrets/` must use mode `0700`.
+- The service never requests Gmail send scope.
+- Logs omit credentials, authorization headers, message content, summaries, and attachment bytes.
+- The MCP and configuration interfaces bind to loopback by default.
+
+See the [system design](docs/system-design.md) for the complete interface, persistence, failure, and out-of-scope contracts.
